@@ -17,7 +17,7 @@ CONFIG_SPL_FS_FAT=y
 CONFIG_DISTRO_DEFAULTS=y
 CONFIG_FIT=y
 CONFIG_USE_BOOTCOMMAND=y
-CONFIG_BOOTCOMMAND="mw.l 10d13224 14; mw.l 10d13228 14; mw.l 10d1323c 14; mw.l 10d13234 14; mw.l 10d13248 14; mw.l 10d1324C 14; mw.l 0x10D11028 0x05027ffe 1; mw.l 0x10c03304 0x410 1; mw.l 0x10c03300 0x00000410; mw.l 0x10c03300 0x00000000; sleep 1; mw.l 0x10c03300 0x00000410; bridge enable 0x02; fatls mmc 0:1; fatload mmc 0:1 82000000 Image; fatload mmc 0:1 86000000 socfpga_agilex5_axe5_eagle.dtb; setenv bootargs console=ttyS0,115200 root=${mmcroot} rw rootwait; booti 0x82000000 - 0x86000000; run distro_bootcmd"
+CONFIG_BOOTCOMMAND="mw.l 10d13224 14; mw.l 10d13228 14; mw.l 10d1323c 14; mw.l 10d13234 14; mw.l 10d13248 14; mw.l 10d1324C 14; mw.l 0x10D11028 0x05027ffe 1; mw.l 0x10c03304 0x410 1; mw.l 0x10c03300 0x00000410; mw.l 0x10c03300 0x00000000; sleep 1; mw.l 0x10c03300 0x00000410; bridge enable; mw.l 0x021000070 0x00000000; sleep 1; mw.l 0x21000070 0x00000001; fatls mmc 0:1; fatload mmc 0:1 82000000 Image; fatload mmc 0:1 86000000 socfpga_agilex5_axe5_eagle.dtb; setenv bootargs console=ttyS0,115200 root=${mmcroot} rw rootwait; booti 0x82000000 - 0x86000000; run distro_bootcmd"
 CONFIG_SPL_FIT_SIGNATURE=y
 CONFIG_SPL_LOAD_FIT=y
 CONFIG_SPL_LOAD_FIT_ADDRESS=0x82000000
