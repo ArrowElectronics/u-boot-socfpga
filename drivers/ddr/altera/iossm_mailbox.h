@@ -3,7 +3,6 @@
  * Copyright (C) 2022-2023 Intel Corporation <www.intel.com>
  */
 
-#define TIMEOUT_10000MS			10000
 #define TIMEOUT_120000MS		120000
 #define TIMEOUT				TIMEOUT_120000MS
 #define IOSSM_STATUS_CAL_SUCCESS	BIT(0)
@@ -26,7 +25,6 @@
 #define IOSSM_CMD_RESPONSE_DATA_SHORT_MASK	GENMASK(31, 16)
 #define IOSSM_CMD_RESPONSE_DATA_SHORT(data) (((data) & IOSSM_CMD_RESPONSE_DATA_SHORT_MASK) >> 16)
 #define MAX_IO96B_SUPPORTED		2
-#define MAX_MEM_INTERFACES_SUPPORTED	2
 
 /* supported mailbox command type */
 enum iossm_mailbox_cmd_type  {
@@ -90,9 +88,7 @@ struct io96b_mb_ctrl {
  */
 struct io96b_mb_resp {
 	u32 cmd_resp_status;
-	u32 cmd_resp_data_0;
-	u32 cmd_resp_data_1;
-	u32 cmd_resp_data_2;
+	u32 cmd_resp_data[3];
 };
 
 /*
@@ -118,8 +114,7 @@ struct io96b_instance {
  * @ddr_type:		DDR memory type
  * @ecc_status:		ECC enable status (false = disabled, true = enabled)
  * @overall_size:	Total DDR memory size
- * @io96b_0:		IO96B 0 instance specific information
- * @io96b_1:		IO96B 1 instance specific information
+ * @io96b[]:		IO96B instance specific information
  * @ckgen_lock:		IO96B GEN PLL lock (false = not locked, true = locked)
  * @num_port:		Number of IO96B port. Example bit 0 represent port 0, bit 1 represent port 1, and so on
  */
@@ -129,8 +124,7 @@ struct io96b_info {
 	const char *ddr_type;
 	bool ecc_status;
 	u16 overall_size;
-	struct io96b_instance io96b_0;
-	struct io96b_instance io96b_1;
+	struct io96b_instance io96b[MAX_IO96B_SUPPORTED];
 	bool ckgen_lock;
 	u8 num_port;
 };

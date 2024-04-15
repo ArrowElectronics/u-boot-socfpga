@@ -30,6 +30,8 @@
 #include <linux/printk.h>
 #include <linux/sizes.h>
 
+extern bool is_agilex5_reva_workaround_required(void);
+
 static inline struct cadence_nand_info *mtd_to_cadence(struct mtd_info *mtd)
 {
 	return container_of(mtd_to_nand(mtd), struct cadence_nand_info, selected_chip);
@@ -429,6 +431,10 @@ cadence_nand_cdma_desc_prepare(struct cadence_nand_info *cadence,
 
 	cdma_desc->command_type = ctype;
 	cdma_desc->ctrl_data_ptr = ctrl_data_ptr;
+
+	flush_cache((dma_addr_t)cadence->cdma_desc,
+		    ROUND(sizeof(struct cadence_nand_cdma_desc),
+			  ARCH_DMA_MINALIGN));
 }
 
 static u8 cadence_nand_check_desc_error(struct cadence_nand_info *cadence,
@@ -510,6 +516,7 @@ cadence_nand_cdma_send_and_wait(struct cadence_nand_info *cadence,
 {
 	struct cadence_nand_irq_status irq_mask, irq_status = {0};
 	int status;
+	u32 val;
 
 	irq_mask.trd_status = BIT(thread);
 	irq_mask.trd_error = BIT(thread);
@@ -522,6 +529,16 @@ cadence_nand_cdma_send_and_wait(struct cadence_nand_info *cadence,
 		return status;
 
 	cadence_nand_wait_for_irq(cadence, &irq_mask, &irq_status);
+
+	/*
+	 * Make sure the descriptor processing is complete
+	 */
+	status = readl_poll_timeout(cadence->reg + TRD_COMP_INT_STATUS, val,
+				    (val & BIT(thread)), TIMEOUT_US);
+	if (status) {
+		pr_err("cmd thread completion timeout!\n");
+		return status;
+	}
 
 	if (irq_status.status == 0 && irq_status.trd_status == 0 &&
 	    irq_status.trd_error == 0) {
@@ -760,7 +777,12 @@ cadence_nand_cdma_transfer(struct cadence_nand_info *cadence, u8 chip_nr,
 	else
 		ctype = CDMA_CT_WR;
 
+#if IS_ENABLED(CONFIG_TARGET_SOCFPGA_AGILEX5)
+	if (!is_agilex5_reva_workaround_required())
+		cadence_nand_set_ecc_enable(cadence, with_ecc);
+#else
 	cadence_nand_set_ecc_enable(cadence, with_ecc);
+#endif
 
 	dma_buf = dma_map_single(buf, buf_size, dir);
 	if (dma_mapping_error(cadence->dev, dma_buf)) {
@@ -952,7 +974,7 @@ static int cadence_nand_write_page(struct mtd_info *mtd, struct nand_chip *chip,
 	cadence_nand_prepare_data_size(mtd, TT_MAIN_OOB_AREA_EXT);
 
 	if (cadence_nand_dma_buf_ok(cadence, buf, mtd->writesize) &&
-	    cadence->caps2.data_control_supp) {
+	    cadence->caps2.data_control_supp && !(chip->options & NAND_USE_BOUNCE_BUFFER)) {
 		u8 *oob;
 
 		if (oob_required)
@@ -1119,7 +1141,7 @@ static int cadence_nand_read_page(struct mtd_info *mtd, struct nand_chip *chip,
 	 * is supported then transfer data and oob directly.
 	 */
 	if (cadence_nand_dma_buf_ok(cadence, buf, mtd->writesize) &&
-	    cadence->caps2.data_control_supp) {
+	    cadence->caps2.data_control_supp && !(chip->options & NAND_USE_BOUNCE_BUFFER)) {
 		u8 *oob;
 
 		if (oob_required)
@@ -1292,7 +1314,6 @@ static void cadence_nand_read_buf(struct mtd_info *mtd, u8 *buf, int len)
 	u8 thread_nr = 0;
 	u32 sdma_size;
 	int status;
-	u32 index;
 	int len_in_words = len >> 2;
 
 	/* Wait until slave DMA interface is ready to data transfer. */
@@ -1303,9 +1324,7 @@ static void cadence_nand_read_buf(struct mtd_info *mtd, u8 *buf, int len)
 	}
 
 	if (!cadence->caps1->has_dma) {
-		for (index = 0; index < len; index++) {
-			*(buf + index) = ioread8(cadence->io.virt + index);
-		}
+		readsq(cadence->io.virt, buf, len_in_words);
 
 		if (sdma_size > len) {
 			memcpy(cadence->buf, buf + (len_in_words << 2),
@@ -1322,7 +1341,6 @@ static void cadence_nand_write_buf(struct mtd_info *mtd, const u8 *buf, int len)
 	u8 thread_nr = 0;
 	u32 sdma_size;
 	int status;
-	u32 index;
 	int len_in_words = len >> 2;
 
 	/* Wait until slave DMA interface is ready to data transfer. */
@@ -1333,9 +1351,7 @@ static void cadence_nand_write_buf(struct mtd_info *mtd, const u8 *buf, int len)
 	}
 
 	if (!cadence->caps1->has_dma) {
-		for (index = 0; index < len; index++) {
-			iowrite8(*(buf + index), cadence->io.virt + index);
-		}
+		writesq(cadence->io.virt, buf, len_in_words);
 
 		if (sdma_size > len) {
 			memcpy(cadence->buf, buf + (len_in_words << 2),
@@ -1348,6 +1364,7 @@ static void cadence_nand_write_buf(struct mtd_info *mtd, const u8 *buf, int len)
 
 static int cadence_nand_cmd_opcode(struct cadence_nand_info *cadence, unsigned int op_id)
 {
+	struct cdns_nand_chip *cdns_chip = to_cdns_nand_chip(&cadence->selected_chip);
 	u64 mini_ctrl_cmd = 0;
 	int ret;
 
@@ -1356,7 +1373,7 @@ static int cadence_nand_cmd_opcode(struct cadence_nand_info *cadence, unsigned i
 	mini_ctrl_cmd |= FIELD_PREP(GCMD_LAY_INPUT_CMD, op_id);
 
 	ret = cadence_nand_generic_cmd_send(cadence,
-					    cadence->assigned_cs,
+					    cdns_chip->cs[cadence->assigned_cs],
 					    mini_ctrl_cmd);
 
 	if (ret)
@@ -1369,6 +1386,7 @@ static int cadence_nand_cmd_opcode(struct cadence_nand_info *cadence, unsigned i
 static int cadence_nand_cmd_address(struct cadence_nand_info *cadence,
 				    unsigned int naddrs, const u8 *addrs)
 {
+	struct cdns_nand_chip *cdns_chip = to_cdns_nand_chip(&cadence->selected_chip);
 	u64 address = 0;
 	u64 mini_ctrl_cmd = 0;
 	int ret;
@@ -1388,7 +1406,7 @@ static int cadence_nand_cmd_address(struct cadence_nand_info *cadence,
 				    naddrs - 1);
 
 	ret = cadence_nand_generic_cmd_send(cadence,
-					    cadence->assigned_cs,
+					    cdns_chip->cs[cadence->assigned_cs],
 					    mini_ctrl_cmd);
 
 	if (ret)
@@ -1400,6 +1418,7 @@ static int cadence_nand_cmd_address(struct cadence_nand_info *cadence,
 static int cadence_nand_cmd_data(struct cadence_nand_info *cadence,
 				 unsigned int len, u8 mode)
 {
+	struct cdns_nand_chip *cdns_chip = to_cdns_nand_chip(&cadence->selected_chip);
 	u64 mini_ctrl_cmd = 0;
 	int ret;
 
@@ -1414,7 +1433,7 @@ static int cadence_nand_cmd_data(struct cadence_nand_info *cadence,
 	mini_ctrl_cmd |= FIELD_PREP(GCMD_LAST_SIZE, len);
 
 	ret = cadence_nand_generic_cmd_send(cadence,
-					    cadence->assigned_cs,
+					    cdns_chip->cs[cadence->assigned_cs],
 					    mini_ctrl_cmd);
 
 	if (ret) {
@@ -1428,11 +1447,12 @@ static int cadence_nand_cmd_data(struct cadence_nand_info *cadence,
 static int cadence_nand_waitfunc(struct mtd_info *mtd, struct nand_chip *chip)
 {
 	struct cadence_nand_info *cadence = mtd_to_cadence(mtd);
+	struct cdns_nand_chip *cdns_chip = to_cdns_nand_chip(&cadence->selected_chip);
 	int status;
 
 	status = cadence_nand_wait_for_value(cadence, RBN_SETINGS,
 					     TIMEOUT_US,
-					     BIT(cadence->assigned_cs),
+					     BIT(cdns_chip->cs[cadence->assigned_cs]),
 					     false);
 	return status;
 }
@@ -1803,19 +1823,22 @@ static int cadence_nand_attach_chip(struct mtd_info *mtd, struct nand_chip *chip
 {
 	struct cadence_nand_info *cadence = mtd_to_cadence(mtd);
 	struct cdns_nand_chip *cdns_chip = to_cdns_nand_chip(chip);
+	static struct nand_ecclayout nand_oob;
 	u32 ecc_size;
 	int ret;
 
-	ret = cadence_nand_set_access_width16(cadence, true);
-	if (ret)
-		return ret;
+	if (chip->options & NAND_BUSWIDTH_16) {
+		ret = cadence_nand_set_access_width16(cadence, true);
+		if (ret)
+			return ret;
+	}
 
+	chip->options |= NAND_USE_BOUNCE_BUFFER;
 	chip->bbt_options |= NAND_BBT_USE_FLASH;
 	chip->bbt_options |= NAND_BBT_NO_OOB;
 	chip->ecc.mode = NAND_ECC_HW_SYNDROME;
 
 	chip->options |= NAND_NO_SUBPAGE_WRITE;
-	chip->options |= NAND_BUSWIDTH_16;
 
 	cdns_chip->bbm_offs = chip->badblockpos;
 	cdns_chip->bbm_offs &= ~0x01;
@@ -1884,6 +1907,9 @@ static int cadence_nand_attach_chip(struct mtd_info *mtd, struct nand_chip *chip
 
 	mtd_set_ooblayout(mtd, &cadence_nand_ooblayout_ops);
 
+	nand_oob.eccbytes = cadence->selected_chip.ecc.bytes;
+	cadence->selected_chip.ecc.layout = &nand_oob;
+
 	return 0;
 }
 
@@ -1926,7 +1952,7 @@ static int cadence_nand_readid(struct mtd_info *mtd, int offset_in_page, unsigne
 	if (ret)
 		return ret;
 
-	ret = cadence_nand_cmd_address(cadence, 1, &addrs);
+	ret = cadence_nand_cmd_address(cadence, ONE_CYCLE, &addrs);
 	if (ret)
 		return ret;
 
@@ -1937,10 +1963,76 @@ static int cadence_nand_readid(struct mtd_info *mtd, int offset_in_page, unsigne
 	return 0;
 }
 
-static void cadence_nand_cmdfunc(struct mtd_info *mtd, unsigned int command,
+static int cadence_nand_param(struct mtd_info *mtd, u8 offset_in_page, unsigned int command)
+{
+	struct cadence_nand_info *cadence = mtd_to_cadence(mtd);
+	struct nand_chip *chip = mtd_to_nand(mtd);
+	int ret = 0;
+
+	ret = cadence_nand_cmd_opcode(cadence, command);
+	if (ret)
+		return ret;
+
+	ret = cadence_nand_cmd_address(cadence, ONE_CYCLE, &offset_in_page);
+	if (ret)
+		return ret;
+
+	ret = cadence_nand_waitfunc(mtd, chip);
+	if (ret)
+		return ret;
+
+	ret = cadence_nand_cmd_data(cadence, sizeof(struct nand_jedec_params), GCMD_DIR_READ);
+	if (ret)
+		return ret;
+
+	return 0;
+}
+
+static int cadence_nand_reset(struct mtd_info *mtd, unsigned int command)
+{
+	struct cadence_nand_info *cadence = mtd_to_cadence(mtd);
+	struct nand_chip *chip = mtd_to_nand(mtd);
+	int ret = 0;
+
+	ret = cadence_nand_cmd_opcode(cadence, command);
+	if (ret)
+		return ret;
+
+	ret = cadence_nand_waitfunc(mtd, chip);
+	if (ret)
+		return ret;
+
+	return 0;
+}
+
+static int cadence_nand_features(struct mtd_info *mtd, u8 offset_in_page, u32 command)
+{
+	struct cadence_nand_info *cadence = mtd_to_cadence(mtd);
+	int ret = 0;
+
+	ret = cadence_nand_cmd_opcode(cadence, command);
+	if (ret)
+		return ret;
+
+	ret = cadence_nand_cmd_address(cadence, ONE_CYCLE, &offset_in_page);
+	if (ret)
+		return ret;
+
+	if (command == NAND_CMD_GET_FEATURES)
+		ret = cadence_nand_cmd_data(cadence, ONFI_SUBFEATURE_PARAM_LEN,
+					    GCMD_DIR_READ);
+	else
+		ret = cadence_nand_cmd_data(cadence, ONFI_SUBFEATURE_PARAM_LEN,
+					    GCMD_DIR_WRITE);
+
+	return ret;
+}
+
+static void cadence_nand_cmdfunc(struct mtd_info *mtd, u32 command,
 				 int offset_in_page, int page)
 {
 	struct cadence_nand_info *cadence = mtd_to_cadence(mtd);
+	struct nand_chip *chip = mtd_to_nand(mtd);
 	int ret = 0;
 
 	cadence->cmd = command;
@@ -1953,11 +2045,30 @@ static void cadence_nand_cmdfunc(struct mtd_info *mtd, unsigned int command,
 		ret = cadence_nand_readid(mtd, offset_in_page, command);
 		break;
 
+	case NAND_CMD_PARAM:
+		ret = cadence_nand_param(mtd, offset_in_page, command);
+		break;
+
+	case NAND_CMD_RESET:
+		ret = cadence_nand_reset(mtd, command);
+		break;
+
+	case NAND_CMD_SET_FEATURES:
+	case NAND_CMD_GET_FEATURES:
+		ret = cadence_nand_features(mtd, offset_in_page, command);
+		break;
 	/*
-	 * ecc will override other command for erase, write and erase
+	 * ecc will override other command for read, write and erase
 	 */
 	default:
 		break;
+	}
+
+	if (cadence->cmd == NAND_CMD_RESET) {
+		ret = cadence_nand_select_target(cadence, chip);
+		if (ret) {
+			dev_err(cadence->dev, "Chip select failure after reset\n");
+		}
 	}
 
 	if (ret != 0)
@@ -1985,6 +2096,10 @@ static u8 cadence_nand_read_byte(struct mtd_info *mtd)
 	if (cadence->buf_index == 0) {
 		if (cadence->cmd == NAND_CMD_READID) {
 			size = 8;
+		} else if (cadence->cmd == NAND_CMD_PARAM) {
+			size = sizeof(struct nand_jedec_params);
+		} else if (cadence->cmd == NAND_CMD_GET_FEATURES) {
+			size = ONFI_SUBFEATURE_PARAM_LEN;
 		}
 		cadence_nand_read_buf(mtd, &cadence->buf[0], size);
 	}
@@ -2058,6 +2173,7 @@ static int cadence_nand_chip_init(struct cadence_nand_info *cadence, ofnode node
 	chip = &cadence->selected_chip;
 	mtd = nand_to_mtd(chip);
 	nand_set_flash_node(chip, node);
+	chip->options |= NAND_BUSWIDTH_AUTO;
 
 	chip->select_chip = cadence_nand_select_chip;
 	chip->cmdfunc = cadence_nand_cmdfunc;
@@ -2068,12 +2184,6 @@ static int cadence_nand_chip_init(struct cadence_nand_info *cadence, ofnode node
 	chip->read_buf = cadence_nand_read_buf;
 	chip->write_buf = cadence_nand_write_buf;
 	chip->setup_data_interface = cadence_setup_data_interface;
-
-	ret = cadence_nand_select_target(cadence, chip);
-	if (ret) {
-		dev_err(cadence->dev, "Chip select failure\n");
-		goto free_buf;
-	}
 
 	ret = nand_scan_ident(mtd, 1, NULL);
 	if (ret) {
