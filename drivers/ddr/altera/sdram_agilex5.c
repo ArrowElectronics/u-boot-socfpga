@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2019-2023 Intel Corporation <www.intel.com>
+ * Copyright (C) 2019-2024 Intel Corporation <www.intel.com>
  *
  */
 
@@ -22,6 +22,7 @@
 #include <asm/arch/system_manager.h>
 #include <asm/io.h>
 #include <linux/sizes.h>
+#include <linux/bitfield.h>
 
 DECLARE_GLOBAL_DATA_PTR;
 
@@ -33,6 +34,8 @@ DECLARE_GLOBAL_DATA_PTR;
 #define SIDEBANDMGR_FLAGOUTSTATUS0_REG	SOCFPGA_F2SDRAM_MGR_ADDRESS +\
 					F2SDRAM_SIDEBAND_FLAGOUTSTATUS0
 
+#define PORT_EMIF_CONFIG_OFFSET 4
+
 /* Reset type */
 enum reset_type {
 	POR_RESET,
@@ -43,6 +46,11 @@ enum reset_type {
 	RSU_RECONFIG
 };
 
+phys_addr_t io96b_csr_reg_addr[] = {
+	0x18400000, /* IO96B_0 CSR registers address */
+	0x18800000  /* IO96B_1 CSR registers address */
+};
+
 static enum reset_type get_reset_type(u32 reg)
 {
 	return (reg & ALT_SYSMGR_SCRATCH_REG_3_DDR_RESET_TYPE_MASK) >>
@@ -51,6 +59,9 @@ static enum reset_type get_reset_type(u32 reg)
 
 int set_mpfe_config(void)
 {
+	/* Set mpfe_lite_intfcsel */
+	setbits_le32(socfpga_get_sysmgr_addr() + SYSMGR_SOC64_MPFE_CONFIG, BIT(2));
+
 	/* Set mpfe_lite_active */
 	setbits_le32(socfpga_get_sysmgr_addr() + SYSMGR_SOC64_MPFE_CONFIG, BIT(8));
 
@@ -86,7 +97,6 @@ void ddr_init_inprogress(bool start)
 int populate_ddr_handoff(struct udevice *dev, struct io96b_info *io96b_ctrl)
 {
 	struct altera_sdram_plat *plat = dev_get_plat(dev);
-	fdt_addr_t addr;
 	int i;
 	u32 len = SOC64_HANDOFF_SDRAM_LEN;
 	u32 handoff_table[len];
@@ -95,16 +105,16 @@ int populate_ddr_handoff(struct udevice *dev, struct io96b_info *io96b_ctrl)
 	socfpga_handoff_read((void *)SOC64_HANDOFF_SDRAM, handoff_table, len);
 
 	/* Read handoff - dual port */
-	plat->dualport = handoff_table[0] & BIT(0);
+	plat->dualport = FIELD_GET(BIT(0), handoff_table[PORT_EMIF_CONFIG_OFFSET]);
 	debug("%s: dualport from handoff: 0x%x\n", __func__, plat->dualport);
 
 	if (plat->dualport)
-		io96b_ctrl->num_port = 3;
+		io96b_ctrl->num_port = 2;
 	else
 		io96b_ctrl->num_port = 1;
 
 	/* Read handoff - dual EMIF */
-	plat->dualemif = handoff_table[0] & BIT(1);
+	plat->dualemif = FIELD_GET(BIT(1), handoff_table[PORT_EMIF_CONFIG_OFFSET]);
 	debug("%s: dualemif from handoff: 0x%x\n", __func__, plat->dualemif);
 
 	if (plat->dualemif)
@@ -114,11 +124,7 @@ int populate_ddr_handoff(struct udevice *dev, struct io96b_info *io96b_ctrl)
 
 	/* Assign IO96B CSR base address if it is valid */
 	for (i = 0; i < io96b_ctrl->num_instance; i++) {
-		addr = dev_read_addr_index(dev, i + 1);
-		if (addr == FDT_ADDR_T_NONE)
-			return -EINVAL;
-
-		io96b_ctrl->io96b[i].io96b_csr_addr = addr;
+		io96b_ctrl->io96b[i].io96b_csr_addr = io96b_csr_reg_addr[i];
 		debug("%s: IO96B 0x%llx CSR enabled\n", __func__
 			, io96b_ctrl->io96b[i].io96b_csr_addr);
 	}
@@ -144,6 +150,27 @@ int config_mpfe_sideband_mgr(struct udevice *dev)
 	      readl(SIDEBANDMGR_FLAGOUTSTATUS0_REG));
 
 	return 0;
+}
+
+static void config_ccu_mgr(struct udevice *dev)
+{
+	int ret = 0;
+	struct altera_sdram_plat *plat = dev_get_plat(dev);
+
+	if (plat->dualport || plat->dualemif) {
+		debug("%s: config interleaving on ccu reg\n", __func__);
+		ret = uclass_get_device_by_name(UCLASS_NOP,
+						"socfpga-secreg-ccu-interleaving-on", &dev);
+	} else {
+		debug("%s: config interleaving off ccu reg\n", __func__);
+		ret = uclass_get_device_by_name(UCLASS_NOP,
+						"socfpga-secreg-ccu-interleaving-off", &dev);
+	}
+
+	if (ret) {
+		printf("interleaving on/off ccu settings init failed: %d\n", ret);
+		hang();
+	}
 }
 
 bool hps_ocram_dbe_status(void)
@@ -199,12 +226,6 @@ int sdram_mmr_init_full(struct udevice *dev)
 		return ret;
 	}
 
-	/* Configure if polling is needed for IO96B GEN PLL locked */
-	io96b_ctrl->ckgen_lock = true;
-
-	/* Ensure calibration status passing */
-	init_mem_cal(io96b_ctrl);
-
 	/* Configuring MPFE sideband manager registers - dual port & dual emif*/
 	ret = config_mpfe_sideband_mgr(dev);
 	if (ret) {
@@ -212,6 +233,15 @@ int sdram_mmr_init_full(struct udevice *dev)
 		free(io96b_ctrl);
 		return ret;
 	}
+
+	/* Configuring Interleave/Non-interleave ccu registers */
+	config_ccu_mgr(dev);
+
+	/* Configure if polling is needed for IO96B GEN PLL locked */
+	io96b_ctrl->ckgen_lock = true;
+
+	/* Ensure calibration status passing */
+	init_mem_cal(io96b_ctrl);
 
 	/* Initiate IOSSM mailbox */
 	io96b_mb_init(io96b_ctrl);

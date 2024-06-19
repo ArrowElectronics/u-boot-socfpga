@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0
  *
- * Copyright (C) 2016-2023 Intel Corporation <www.intel.com>
+ * Copyright (C) 2016-2024 Intel Corporation <www.intel.com>
  *
  */
 
@@ -80,7 +80,7 @@
 #if IS_ENABLED(CONFIG_TARGET_SOCFPGA_AGILEX5)
 #define SOC64_HANDOFF_PERI		(SOC64_HANDOFF_BASE + 0x620)
 #define SOC64_HANDOFF_SDRAM		(SOC64_HANDOFF_BASE + 0x634)
-#define SOC64_HANDOFF_SDRAM_LEN		1
+#define SOC64_HANDOFF_SDRAM_LEN		5
 #endif
 
 #if IS_ENABLED(CONFIG_TARGET_SOCFPGA_STRATIX10)
