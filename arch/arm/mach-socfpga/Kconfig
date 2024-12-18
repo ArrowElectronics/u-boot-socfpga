@@ -242,6 +242,10 @@ config TARGET_SOCFPGA_AGILEX5_SOCDK
 	bool "Intel SOCFPGA SoCDK (Agilex5)"
 	select TARGET_SOCFPGA_AGILEX5
 
+config TARGET_SOCFPGA_AGILEX5_AXE5_EAGLE
+	bool "Arrow SOCFPGA AXE5 EAGLE (Agilex5)"
+	select TARGET_SOCFPGA_AGILEX5
+
 config TARGET_SOCFPGA_AGILEX7M_SOCDK
 	bool "Intel SOCFPGA SoCDK (Agilex7)"
 	select TARGET_SOCFPGA_AGILEX7M
@@ -321,6 +325,7 @@ endchoice
 config SYS_BOARD
 	default "agilex7m-socdk" if TARGET_SOCFPGA_AGILEX7M_SOCDK
 	default "agilex5-socdk" if TARGET_SOCFPGA_AGILEX5_SOCDK
+	default "agilex5-axe5-eagle" if TARGET_SOCFPGA_AGILEX5_AEX5_EAGLE	
 	default "agilex-n6010" if TARGET_SOCFPGA_AGILEX_N6010
 	default "agilex-socdk" if TARGET_SOCFPGA_AGILEX_SOCDK
 	default "arria5-socdk" if TARGET_SOCFPGA_ARRIA5_SOCDK
@@ -346,6 +351,7 @@ config SYS_BOARD
 config SYS_VENDOR
 	default "intel" if TARGET_SOCFPGA_AGILEX7M_SOCDK
 	default "intel" if TARGET_SOCFPGA_AGILEX5_SOCDK
+	default "arrow" if TARGET_SOCFPGA_AGILEX5_AEX5_EAGLE
 	default "intel" if TARGET_SOCFPGA_AGILEX_N6010
 	default "intel" if TARGET_SOCFPGA_AGILEX_SOCDK
 	default "intel" if TARGET_SOCFPGA_N5X_SOCDK
@@ -371,6 +377,7 @@ config SYS_SOC
 config SYS_CONFIG_NAME
 	default "socfpga_agilex7m_socdk" if TARGET_SOCFPGA_AGILEX7M_SOCDK
 	default "socfpga_agilex5_socdk" if TARGET_SOCFPGA_AGILEX5_SOCDK
+	default "socfpga_agilex5_axe5_eagle" if TARGET_SOCFPGA_AGILEX5_AXE5_EAGLE
 	default "socfpga_agilex_n6010" if TARGET_SOCFPGA_AGILEX_N6010
 	default "socfpga_agilex_socdk" if TARGET_SOCFPGA_AGILEX_SOCDK
 	default "socfpga_arria5_secu1" if TARGET_SOCFPGA_ARRIA5_SECU1
