@@ -91,6 +91,15 @@
     	bootph-all;
 };
 
+&sd_emmc_power {
+	bootph-all;
+};
+
+&sd_io_1v8_reg {
+	gpios = <&portb 3 GPIO_ACTIVE_HIGH>;
+	bootph-all;
+};
+
 &mmc {
 	status = "okay";
 
@@ -166,6 +175,25 @@
 
 &watchdog0 {
 	bootph-all;
+};
+
+&gmac2 {
+	status = "okay";
+	phy-mode = "rgmii-id";
+	phy-handle = <&emac2_phy0>;
+
+	max-frame-size = <9000>;
+
+	mdio0 {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		compatible = "snps,dwxgmac-mdio";
+		emac2_phy0: ethernet-phy@1 {
+			reg = <1>;
+			adi,rx-internal-delay-ps = <2000>;
+			adi,tx-internal-delay-ps = <2000>;
+		};
+	};
 };
 
 #if !defined(CONFIG_SOCFPGA_SECURE_VAB_AUTH)

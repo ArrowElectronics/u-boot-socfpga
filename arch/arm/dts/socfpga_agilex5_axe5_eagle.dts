@@ -191,7 +191,7 @@
 
 &gmac0 {
 	status = "enabled";
-	phy-mode = "rgmii";
+	phy-mode = "rgmii-id";
 	mac-mode = "gmii";
 	phy-handle = <&emac0_phy0>;
 
@@ -204,13 +204,15 @@
 		compatible = "snps,dwxgmac-mdio";
 		emac0_phy0: ethernet-phy@1 {
 			reg = <0>;
+			adi,rx-internal-delay-ps = <2000>;
+			adi,tx-internal-delay-ps = <2000>;			
 		};
 	};
 };
 
 &gmac2 {
 	status = "enabled";
-	phy-mode = "rgmii";
+	phy-mode = "rgmii-id";
 	phy-handle = <&emac2_phy0>;
 
 	max-frame-size = <9000>;
@@ -220,7 +222,9 @@
 		#size-cells = <0>;
 		compatible = "snps,dwxgmac-mdio";
 		emac2_phy0: ethernet-phy@1 {
-			reg = <0>;
+			reg = <1>;
+			adi,rx-internal-delay-ps = <2000>;
+			adi,tx-internal-delay-ps = <2000>;			
 		};
 	};
 };
