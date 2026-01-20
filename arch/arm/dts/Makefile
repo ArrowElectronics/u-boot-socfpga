@@ -455,6 +455,7 @@ dtb-$(CONFIG_ARCH_SOCFPGA) +=				\
 	socfpga_agilex5_socdk_nand2.dtb			\
 	socfpga_agilex5_emu.dtb				\
 	socfpga_agilex5_axe5_eagle.dtb			\
+	socfpga_agilex5_axe5_falcon.dtb			\
 	socfpga_agilex7m_socdk.dtb			\
 	socfpga_agilex7m_socdk_nand.dtb			\
 	socfpga_arria5_secu1.dtb			\
