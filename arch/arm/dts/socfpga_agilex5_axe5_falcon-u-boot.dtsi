@@ -182,14 +182,14 @@
 	phy-mode = "rgmii-id";
 	phy-handle = <&emac2_phy0>;
 
+	max-frame-size = <9000>;
+
 	mdio0 {
 		#address-cells = <1>;
 		#size-cells = <0>;
+		compatible = "snps,dwmac-mdio";
 		emac2_phy0: ethernet-phy@3 {
 			reg = <3>;
-            		compatible = "micrel,ksz9031"; 
-            		device_type = "ethernet-phy";
-			phy-reset-gpios = <&gpio1 10 GPIO_ACTIVE_LOW>;            					
 		};
 	};
 };
